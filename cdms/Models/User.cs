@@ -9,9 +9,11 @@ namespace cdms.Models
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
         public bool IsActive { get; set; } = true;
-        public string Role { get; set; } = "User"; // e.g., User, Admin
+        public string Role { get; set; } = "Customer";
         public string FullName { get; set; } = string.Empty;
         public string PhoneNumber { get; set; } = string.Empty;
+        public bool EmailVerified { get; set; } = false;
+        public bool PhoneVerified { get; set; } = false;
         public string Address { get; set; } = string.Empty;
         public DateOnly DateOfBirth { get; set; }
         public string ProfilePictureUrl { get; set; } = string.Empty;

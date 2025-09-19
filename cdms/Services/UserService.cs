@@ -56,5 +56,10 @@ namespace cdms.Services
 
         public IQueryable<User> GetAllCustomers()
             => _db.Users.Where(u => u.Role == "Customer");
+        public async Task UpdateAsync(User user)
+        {
+            _db.Users.Update(user);
+            await _db.SaveChangesAsync();
+        }
     }
 }

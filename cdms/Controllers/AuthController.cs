@@ -30,17 +30,33 @@ namespace cdms.Controllers
             if (string.IsNullOrWhiteSpace(dto.Email) || string.IsNullOrWhiteSpace(dto.Password))
                 return BadRequest(new { error = "Email and password required" });
 
-            var exists = await _users.GetByEmailAsync(dto.Email);
-            if (exists != null) return BadRequest(new { error = "Email already exists" });
+            var normalizedEmail = dto.Email.Trim().ToLowerInvariant();
+            var existing = await _users.GetByEmailAsync(normalizedEmail);
 
+            if (existing != null)
+            {
+                if (existing.EmailVerified)
+                {
+                    return BadRequest(new { error = "Email already registered and verified." });
+                }
+                else
+                {
+                    // User exists but not verified → regenerate OTP
+                    _otps.Generate(existing.Id, "register");
+                    return Ok(new { message = "User already exists but not verified. New OTP sent." });
+                }
+            }
+
+            // Create new inactive + unverified user
             var user = new User
             {
-                Email = dto.Email,
+                Email = normalizedEmail,
                 PasswordHash = UserService.HashPassword(dto.Password),
                 Role = string.IsNullOrWhiteSpace(dto.Role) ? "Customer" : dto.Role,
                 FullName = dto.FullName,
                 PhoneNumber = dto.PhoneNumber,
-                IsActive = true
+                IsActive = false,          // inactive until verified
+                EmailVerified = false      // explicitly mark unverified
             };
 
             await _users.AddAsync(user);
@@ -52,20 +68,28 @@ namespace cdms.Controllers
         [HttpPost("verify-register")]
         public async Task<IActionResult> VerifyRegister([FromBody] VerifyDto dto)
         {
-            var user = await _users.GetByEmailAsync(dto.Email);
-            if (user == null) return BadRequest(new { error = "User not found" });
+            var normalizedEmail = dto.Email.Trim().ToLowerInvariant();
+            var user = await _users.GetByEmailAsync(normalizedEmail);
+
+            if (user == null)
+                return BadRequest(new { error = "User not found" });
 
             if (!_otps.Validate(user.Id, dto.Code, "register"))
                 return BadRequest(new { error = "Invalid or expired OTP" });
 
+            // Mark verified + active
             user.IsActive = true;
+            user.EmailVerified = true;
+            await _users.UpdateAsync(user);
+
             return Ok(new { message = "Registration confirmed. You can now login." });
         }
+
 
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginDto dto)
         {
-            var user = await _users.GetByEmailAsync(dto.Email);
+            var user = await _users.GetByEmailAsync(dto.Email.Trim().ToLowerInvariant());
             if (user == null) return BadRequest(new { error = "Invalid credentials" });
             if (!user.IsActive) return BadRequest(new { error = "Account not active" });
             if (!await _users.VerifyPasswordAsync(user, dto.Password)) return BadRequest(new { error = "Invalid credentials" });
@@ -83,7 +107,7 @@ namespace cdms.Controllers
             if (!_otps.Validate(user.Id, dto.Code, "login"))
                 return BadRequest(new { error = "Invalid or expired OTP" });
 
-            var key = _config["Jwt:Key"] ?? "THIS_IS_A_DEMO_SECRET";
+            var key = _config["Jwt:Key"] ?? "ThisIsAStrongSecretKeyForJwtToken123";
             var tokenHandler = new JwtSecurityTokenHandler();
             var tokenDescriptor = new SecurityTokenDescriptor
             {

@@ -41,13 +41,10 @@ namespace cdms.Controllers
         [HttpPost]
         public async Task<IActionResult> Add([FromBody] CarDto dto)
         {
-            var otp = Request.Headers["X-OTP-Code"].ToString();
             var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (string.IsNullOrEmpty(userIdStr))
                 return BadRequest(new { error = "Missing user identifier" });
             var userId = Guid.Parse(userIdStr);
-            if (string.IsNullOrEmpty(otp) || !_otps.Validate(userId, otp, "update"))
-                return BadRequest(new { error = "Missing or invalid OTP" });
 
             var car = new Car
             {
@@ -73,21 +70,81 @@ namespace cdms.Controllers
             return CreatedAtAction(nameof(Get), new { id = car.Id }, car);
         }
 
+        // [Authorize(Roles = "Admin")]
+        // [HttpPut("{id}")]
+        // public async Task<IActionResult> Update(Guid id, [FromBody] CarDto dto)
+        // {
+        //     var otp = Request.Headers["X-OTP-Code"].ToString();
+        //     var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        //     if (string.IsNullOrEmpty(userIdStr))
+        //         return BadRequest(new { error = "Missing user identifier" });
+        //     var userId = Guid.Parse(userIdStr);
+        //     if (string.IsNullOrEmpty(otp) || !_otps.Validate(userId, otp, "update"))
+        //         return BadRequest(new { error = "Missing or invalid OTP" });
+
+        //     var existing = await _cars.GetByIdAsync(id);
+        //     if (existing == null) return NotFound(new { error = "Car not found" });
+
+        //     existing.Make = dto.Make;
+        //     existing.Model = dto.Model;
+        //     existing.Year = dto.Year;
+        //     existing.TrimLevel = dto.TrimLevel;
+        //     existing.MarketRegion = dto.MarketRegion;
+        //     existing.Color = dto.Color;
+        //     existing.LicensePlate = dto.LicensePlate;
+        //     existing.IsAvailable = dto.IsAvailable;
+        //     existing.PricePerDay = dto.PricePerDay;
+        //     existing.Mileage = dto.Mileage;
+        //     existing.TransmissionType = dto.TransmissionType;
+        //     existing.FuelType = dto.FuelType;
+        //     existing.NumberOfSeats = dto.NumberOfSeats;
+        //     existing.Description = dto.Description;
+        //     existing.Features = dto.Features;
+        //     existing.ImageUrl = dto.ImageUrl;
+
+        //     await _cars.UpdateAsync(existing);
+        //     return NoContent();
+        // }
+
         [Authorize(Roles = "Admin")]
-        [HttpPut("{id}")]
-        public async Task<IActionResult> Update(Guid id, [FromBody] CarDto dto)
+        [HttpPost("{id}/generate-update-otp")]
+        public async Task<IActionResult> GenerateUpdateOtp(Guid id)
         {
-            var otp = Request.Headers["X-OTP-Code"].ToString();
             var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (string.IsNullOrEmpty(userIdStr))
                 return BadRequest(new { error = "Missing user identifier" });
+
             var userId = Guid.Parse(userIdStr);
-            if (string.IsNullOrEmpty(otp) || !_otps.Validate(userId, otp, "update"))
-                return BadRequest(new { error = "Missing or invalid OTP" });
+
+            var car = await _cars.GetByIdAsync(id);
+            if (car == null) return NotFound(new { error = "Car not found" });
+
+            var otp = _otps.Generate(userId, "update");
+
+            return Ok(new
+            {
+                message = "OTP generated for updating this car. Check console for code.",
+                expiresAt = otp.ExpiresAt
+            });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("{id}/verify-update")]
+        public async Task<IActionResult> VerifyUpdate(Guid id, [FromBody] VerifyUpdateDto dto)
+        {
+            var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userIdStr))
+                return BadRequest(new { error = "Missing user identifier" });
+
+            var userId = Guid.Parse(userIdStr);
+
+            if (!_otps.Validate(userId, dto.Code, "update"))
+                return BadRequest(new { error = "Invalid or expired OTP" });
 
             var existing = await _cars.GetByIdAsync(id);
             if (existing == null) return NotFound(new { error = "Car not found" });
 
+            // Apply updates
             existing.Make = dto.Make;
             existing.Model = dto.Model;
             existing.Year = dto.Year;
@@ -106,8 +163,10 @@ namespace cdms.Controllers
             existing.ImageUrl = dto.ImageUrl;
 
             await _cars.UpdateAsync(existing);
-            return NoContent();
+
+            return Ok(new { message = "Car updated successfully." });
         }
+
 
         [Authorize(Roles = "Admin")]
         [HttpDelete("{id}")]

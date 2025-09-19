@@ -1,9 +1,11 @@
+// Controllers/PurchasesController.cs
 using cdms.DTOs;
 using cdms.Models;
 using cdms.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
+using System.Linq;
 
 namespace cdms.Controllers
 {
@@ -22,16 +24,46 @@ namespace cdms.Controllers
             _otps = otps;
         }
 
+        // STEP 1: Generate OTP for a purchase (customer must call this first)
         [Authorize(Roles = "Customer")]
-        [HttpPost("request")]
-        public async Task<IActionResult> RequestPurchase([FromBody] PurchaseRequestDto dto)
+        [HttpPost("request/generate")]
+        public async Task<IActionResult> GeneratePurchaseOtp([FromBody] PurchaseInitiateDto dto)
         {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
             var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
                 return Unauthorized(new { error = "Invalid or missing user identifier" });
-            var otp = Request.Headers["X-OTP-Code"].ToString();
-            if (string.IsNullOrEmpty(otp) || !_otps.Validate(userId, otp, "purchase"))
-                return BadRequest(new { error = "Missing or invalid OTP" });
+
+            var car = await _cars.GetByIdAsync(dto.CarId);
+            if (car == null) return NotFound(new { error = "Car not found" });
+            if (!car.IsAvailable) return BadRequest(new { error = "Car not available" });
+
+            // Generate OTP tied to this user and purpose "purchase"
+            var otpEntry = _otps.Generate(userId, "purchase");
+            // NOTE: For demo we print OTP to console inside OtpService.Generate.
+            // Do NOT return the code in production. Returning expiresAt only.
+            return Ok(new
+            {
+                message = "OTP generated for purchase. Check console for code.",
+                expiresAt = otpEntry.ExpiresAt
+            });
+        }
+
+        // STEP 2: Confirm with OTP and complete the purchase
+        [Authorize(Roles = "Customer")]
+        [HttpPost("request/confirm")]
+        public async Task<IActionResult> ConfirmPurchase([FromBody] ConfirmPurchaseDto dto)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+                return Unauthorized(new { error = "Invalid or missing user identifier" });
+
+            // Validate OTP
+            if (!_otps.Validate(userId, dto.Code, "purchase"))
+                return BadRequest(new { error = "Invalid or expired OTP" });
 
             var car = await _cars.GetByIdAsync(dto.CarId);
             if (car == null) return NotFound(new { error = "Car not found" });
@@ -48,12 +80,14 @@ namespace cdms.Controllers
             };
 
             await _purchases.AddAsync(purchase);
+
             car.IsAvailable = false;
             await _cars.UpdateAsync(car);
 
             return Ok(purchase);
         }
 
+        // Customer: view their purchase history
         [Authorize(Roles = "Customer")]
         [HttpGet("history")]
         public IActionResult History()
@@ -61,12 +95,18 @@ namespace cdms.Controllers
             var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
                 return Unauthorized(new { error = "Invalid or missing user identifier" });
-            var purchases = _purchases.GetByUser(userId);
+
+            var purchases = _purchases.GetByUser(userId).ToList();
             return Ok(purchases);
         }
 
+        // Admin: view all purchases
         [Authorize(Roles = "Admin")]
         [HttpGet("all")]
-        public IActionResult All() => Ok(_purchases.GetAll());
+        public IActionResult All()
+        {
+            var all = _purchases.GetAll().ToList();
+            return Ok(all);
+        }
     }
 }

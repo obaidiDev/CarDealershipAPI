@@ -1,0 +1,6 @@
+@cdms_HostAddress = http://localhost:5142
+
+GET {{cdms_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

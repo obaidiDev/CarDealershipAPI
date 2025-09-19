@@ -208,4 +208,3 @@ Swagger at:
 ```
 http://localhost:5000/swagger
 ```
-"# CarDealershipAPI" 
